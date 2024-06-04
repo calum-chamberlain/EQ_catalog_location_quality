@@ -1,0 +1,11 @@
+name: nz_catalogue_analysis
+channels:
+  - conda-forge
+dependencies:
+  - obspy
+  - numpy
+  - cartopy
+  - haversine
+  - matplotlib
+  - shapely
+  - jupyter
