@@ -66,3 +66,6 @@ def extract_polygon(region: str):
         raise NotImplementedError(f"{region} is not in known regions: {KNOWN_REGIONS.keys()}")
     return poly
 
+
+if __name__ == "__main__":
+    print("These are not the snakes you are looking for.")
