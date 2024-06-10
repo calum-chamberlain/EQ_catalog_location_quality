@@ -21,7 +21,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from shapely.geometry import Point, Polygon
 
-from typing import Iterable
+from typing import Iterable, List, Tuple
 
 
 @dataclass(frozen=True, order=True)
@@ -245,7 +245,7 @@ def assign_variables(cat_poly: Catalog, inventory: Inventory):
 
     """
 
-    min_az, depths, min_dist, mags, lats, lons, fixed = [], [], [], [], [], [], []
+    max_gap, depths, min_dist, mags, lats, lons, fixed = [], [], [], [], [], [], []
 
     for ev in cat_poly:
         max_gap.append((ev.preferred_origin() or ev.origins[-1]).quality.azimuthal_gap)
