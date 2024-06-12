@@ -198,6 +198,24 @@ def plot_depth_scatter(
     fixed: Iterable[bool],
     region: str,
 ) -> plt.Figure:
+    """
+    Plot depth scatter and stacked histogram for events.
+
+    All inputs should be ordered the same way
+
+    Params
+    ------
+    min_dist:
+        Minimum distance for picks
+    s_picks:
+        Whether S picks exist for the event within 1.4x depth
+    depths:
+        Depth of events
+    fixed:
+        Whether event depths are fixed or not
+    region:
+        Name of region plotted
+    """
 
     max_depth = max(depths)
     max_plot_depth = (10 * (max_depth // 10)) + 10
@@ -210,7 +228,6 @@ def plot_depth_scatter(
     mindistSg, depthsSg, fixedSg = [], [], []  # Dark green
     mindistbad, depthsbad, fixedbad = [], [], []  # Pink - bad
     for i, d in enumerate(min_dist):
-        # TODO: This is likely the source of points plotting in the wrong places, check logic
         loc = Point(d, depths[i])
         if good_poly.contains(loc) and not s_picks[i]:
             # If point is within swath of acceptable depth-distance relation
@@ -272,39 +289,6 @@ def plot_depth_scatter(
 
     bins = np.arange(0, max_plot_depth, 5)
 
-    # Original plot was raw histograms with overlapping (hidden) bars - suggest that a stack plot would be better
-    """
-    ax_histy.hist(
-        depths,
-        bins=bins,
-        orientation="horizontal",
-        color="#B3589A",
-        label="bad: depth < min dist",
-    )
-    ax_histy.hist(
-        depthsS,
-        bins=bins,
-        orientation="horizontal",
-        color="#F6D3E8",
-        label="OK: S-phase contained",
-    )
-    ax_histy.hist(
-        depthsg,
-        bins=bins,
-        orientation="horizontal",
-        color="#BBD4A6",
-        label="good: depth > min dist",
-    )
-    ax_histy.hist(
-        depthsSg,
-        bins=bins,
-        orientation="horizontal",
-        color="#9BBF85",
-        label="best: P+S constraints",
-    )
-    
-    ax_histy.set_xlabel("Number of earthquakes")
-    """
     ax_histy.hist(
         [depths, depthsS, depthsg, depthsSg],
         bins=bins,
@@ -329,7 +313,7 @@ def plot_depth_scatter(
 
 
 def plot_quality_criteria_scores(
-    fixed_inv: Inventory,
+    fixed_inv: Iterable[bool],
     cat_poly: Catalog,
     s_picks: Iterable[bool],
     min_dist_bi: Iterable[bool],
@@ -337,7 +321,31 @@ def plot_quality_criteria_scores(
     min_picks: Iterable[bool],
     min_az_bi: Iterable[bool],
     region: str,
-):
+) -> plt.Figure:
+    """
+    Plot bars of events meeting different quality criteria.
+
+    All inputs should be ordered the same
+
+    Params
+    ------
+    fixed_inv:
+        Whether events have free depths
+    cat_poly:
+        Catalog of events
+    s_picks:
+        Whether S-picks are included
+    min_dist_bi:
+        Whether minimum distance criteria is met
+    ps:
+        Whether P and S pick count criteria are met
+    min_picks:
+        Whether minimum picks criteria are met
+    min_az_bi:
+        Whether minimum azimuth criteria is met
+    region:
+        Name of region
+    """
 
     criteria = [
         "Not fixed",
@@ -374,18 +382,21 @@ def plot_quality_criteria_scores(
 
 def plot_quality_score_map(
     quals,
-    counts,
-    lons,
-    lats,
-    region,
-    poly,
-    cat_poly,
+    counts: Iterable[int],
+    lons: Iterable[float],
+    lats: Iterable[float],
+    region: str,
+    poly: Polygon,
+    cat_poly: Catalog,
     sums,
-    bblons,
-    bblats,
-    splons,
-    splats,
+    bblons: Iterable[float],
+    bblats: Iterable[float],
+    splons: Iterable[float],
+    splats: Iterable[float],
 ):
+    """
+    I don't know what some of these input are.
+    """
 
     fig = plt.figure(figsize=(12, 8))
     ax1 = fig.add_subplot(1, 1, 1, projection=crs.Mercator())

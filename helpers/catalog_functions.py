@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from math import radians, cos, sin, asin, sqrt
 
 from obspy import Catalog, Inventory, UTCDateTime
-from obspy.core.event import Event, Arrival
+from obspy.core.event import Event, Arrival, Pick, Origin
 from obspy.geodetics import gps2dist_azimuth
 
 from typing import Iterable, List, Tuple
@@ -32,7 +32,9 @@ def quality_measures_check(catalog: Catalog, inventory: Inventory) -> Catalog:
     cat_checked = Catalog()
     for ev_in in catalog:
         ev = ev_in.copy()
-        origin = ev.preferred_origin() or ev.origins[-1]
+        origin = _get_origin(ev)
+        if origin is None:
+            continue
         if not origin.quality.minimum_distance:
             # Compute the minimum distance in degrees
             print(
@@ -55,7 +57,9 @@ def get_azimuthal_gap(event: Event, inventory: Inventory) -> float:
     """
     Compute azimuthal gap for an event.
     """
-    origin = event.preferred_origin() or event.origins[-1]
+    origin = _get_origin(event)
+    if origin is None:
+        return 360.0
     azimuths = [
         arr.azimuth or compute_azimuth(arr, event=event, inventory=inventory)
         for arr in origin.arrivals
@@ -98,6 +102,8 @@ def compute_azimuth(arrival: Arrival, event: Event, inventory: Inventory) -> flo
         inventory=inventory, network=pick.waveform_id.network_code, 
         station=pick.waveform_id.station_code, time=pick.time,
         channel=f"{pick.waveform_id.channel_code[0:2]}?")
+    if sta_loc is None:
+        return None
     ori = event.preferred_origin() or event.origins[-1]
     ev_lat, ev_lon = ori.latitude, ori.longitude
     dist, az, baz = gps2dist_azimuth(
@@ -109,7 +115,9 @@ def get_min_dist_degrees(event: Event, inventory: Inventory) -> float:
     """
     Lookup or compute the mimnum distance in degrees between event origin and stations.
     """
-    origin = event.preferred_origin() or event.origins[-1]
+    origin = _get_origin(event)
+    if origin is None:
+        return 360.0
     try:
         arrivals = sorted(origin.arrivals, key=lambda arr: arr.distance)
     except Exception as e:
@@ -130,6 +138,8 @@ def get_min_dist_degrees(event: Event, inventory: Inventory) -> float:
             station=pick.waveform_id.station_code,
             time=pick.time,
         )
+        if pick_coords is None:
+            continue
         dist = haversine(
             lon1=origin.longitude,
             lat1=origin.latitude,
@@ -156,7 +166,9 @@ def lookup_station_coords(
         endtime=time + 120,
         channel=channel,
     )
-    assert len(selected), f"Could not find {network}.{station} at {time}"
+    if len(selected) == 0:
+        warnings.warn(f"Could not find {network}.{station} at {time}")
+        return None
     # Coords is hashable, so we can make a set. If there is more than one item
     # in the set, then we have multiple possible locations.
     channel_locations = {
@@ -166,9 +178,9 @@ def lookup_station_coords(
         for c in s
     }
     if len(channel_locations) > 1:
-        raise NotImplementedError(
+        warnings.warn(
             f"Multiple possible locations for {network}.{station}:\n"
-            f"{channel_locations}"
+            f"{channel_locations}, using zeroth"
         )
     return channel_locations.pop()
 
@@ -213,7 +225,9 @@ def min_dist_calculator(min_dist_rad: float, ev: Event, inventory: Inventory) ->
     inventory:
         Inventory of stations (at least the stations picked in ev)
     """
-    origin = ev.preferred_origin() or ev.origins[-1]
+    origin = _get_origin(ev)
+    if origin is None:
+        return None
     arrivals = sorted(origin.arrivals, key=lambda arr: arr.distance, reverse=False)
     if round(arrivals[0].distance - min_dist_rad, 2) != 0.0:
         warnings.warn(
@@ -234,6 +248,11 @@ def min_dist_calculator(min_dist_rad: float, ev: Event, inventory: Inventory) ->
         pick = arr.pick_id.get_referred_object()
     except Exception as e:
         raise NotImplementedError("Arrival not associated with a pick")
+    return _get_distance_for_pick(pick=pick, origin=origin, inventory=inventory)
+
+
+def _get_distance_for_pick(pick: Pick, origin: Origin, inventory: Inventory):
+    """ Internal func for convenience. """
 
     chan_coords = lookup_station_coords(
         inventory=inventory,
@@ -242,6 +261,8 @@ def min_dist_calculator(min_dist_rad: float, ev: Event, inventory: Inventory) ->
         time=pick.time,
         channel=f"{pick.waveform_id.channel_code[0:-1]}?",
     )
+    if chan_coords is None:
+        return None
     min_dist_m, _, _ = gps2dist_azimuth(
         lat1=origin.latitude,
         lon1=origin.longitude,
@@ -250,6 +271,60 @@ def min_dist_calculator(min_dist_rad: float, ev: Event, inventory: Inventory) ->
     )
 
     return min_dist_m / 1000
+
+
+def _get_origin(event: Event) -> Origin:
+    """ Get the origin of an event. """
+    try:
+        ori = event.preferred_origin() or event.origins[-1]
+    except IndexError:
+        warnings.warn(f"No origins for {event.resource_id.id}")
+        return None
+    return ori
+
+
+def min_spick_dist(cat_poly: Catalog, inventory: Inventory) -> List[bool]:
+    """
+    Check if the closest used S-pick meets the minimum distance-depth requirements.
+
+    Params
+    ------
+    cat_poly:
+        Catalogue to check events for
+    inventory:
+        Inventory used for picking events
+
+    Returns
+    -------
+    list of bool ordered as cat_poly where True events meet the 1.4xdepth requirement
+    """
+    
+    s_picks = list(np.zeros(len(cat_poly), dtype=bool))
+
+    for i, ev in enumerate(cat_poly):
+        # Find closest S-arrival
+        ori = _get_origin(ev)
+        if ori is None:
+            continue
+        min_dist = 999999
+        for arr in ori.arrivals:
+            if not arr.phase.upper().startswith("S"):
+                # Not s-pick, requirement not met for this arrival
+                continue
+            # Calculate distance
+            pick = arr.pick_id.get_referred_object()
+            if pick is None:
+                warnings.warn(f"Arrival for {ev.resource_id.id} not linked to pick. Skipping")
+                # Cannot check - requirement not met for this arrival
+                continue
+            dist = _get_distance_for_pick(pick=pick, origin=ori, inventory=inventory)
+            if dist and dist < min_dist:
+                # Overload min_dist to get the true minimum distance S-pick
+                min_dist = dist
+        # print(f"Min dist for S pick for event {ev.resource_id.id}: {min_dist:.2f} km. Depth: {ori.depth / 1000:.2f}")
+        if min_dist < 1.4 * (ori.depth / 1000):
+            s_picks[i] = True
+    return s_picks
 
 
 def assign_variables(cat_poly: Catalog, inventory: Inventory):
@@ -280,51 +355,24 @@ def assign_variables(cat_poly: Catalog, inventory: Inventory):
     max_gap, depths, min_dist, mags, lats, lons, fixed = [], [], [], [], [], [], []
 
     for ev in cat_poly:
-        max_gap.append((ev.preferred_origin() or ev.origins[-1]).quality.azimuthal_gap)
-        depths.append((ev.preferred_origin() or ev.origins[-1]).depth / 1000)
+        ori = _get_origin(ev)
+        max_gap.append(ori.quality.azimuthal_gap)
+        depths.append(ori.depth / 1000)
         # calculate min_distance
-        min_dist_rad = (
-            ev.preferred_origin() or ev.origins[-1]
-        ).quality.minimum_distance
+        min_dist_rad = ori.quality.minimum_distance
         # find distance in km to station which corresponds to this arrival
         min_dist.append(
             min_dist_calculator(ev=ev, min_dist_rad=min_dist_rad, inventory=inventory)
         )
         mags.append((ev.preferred_magnitude() or ev.magnitude[-1]).mag)
-        lats.append((ev.preferred_origin() or ev.origins[-1]).latitude)
-        lons.append((ev.preferred_origin() or ev.origins[-1]).longitude)
-        if (ev.preferred_origin() or ev.origins[-1]).depth_type == "operator assigned":
-            fixed.append(1)
+        lats.append(ori.latitude)
+        lons.append(ori.longitude)
+        if ori.depth_type == "operator assigned":
+            fixed.append(True)
         else:
-            fixed.append(0)
+            fixed.append(False)
 
     return max_gap, depths, min_dist, mags, lats, lons, fixed
-
-
-def min_spick_dist(cat_poly: Catalog) -> List[bool]:
-
-    # TODO: This should just be a pre-filled np array of False?
-    s_picks = []
-    for j, ev in enumerate(cat_poly):
-        # flags = []
-        for ar in (ev.preferred_origin() or ev.origins[-1]).arrivals:
-            ##### TODO: THIS IS A FUDGE UNTIL THE BUG IN THE DISTANCE CALC USING THE INVENTORY IS FIXED
-            if (
-                ar.phase == "S"
-                and ar.distance * 111.1
-                < 1.4 * (ev.preferred_origin() or ev.origins[-1]).depth / 1000
-            ):
-                s_picks.append(True)
-                # TODO: This could break out of the arrivals loop here.
-                # flags.append(True)
-        # if True in flags:
-        #    s_picks.append(True)
-        # else:
-        #    s_picks.append(False)
-        else:
-            s_picks.append(False)
-
-    return s_picks
 
 
 def binary_counts(
@@ -334,42 +382,69 @@ def binary_counts(
     min_dist: Iterable[float],
     fixed: Iterable[bool],
 ):
+    """
+    Check quality criteria for individual events.
 
-    # TODO: Why are these all ints rather than bools?
+    All inputs must be the same size and ordered the same.
 
+    Params
+    ------
+    max_gap:
+        List of maximum azimuthal gaps for events
+    cat_poly:
+        Catalog of events
+    depths:
+        Depths for all events
+    min_dist:
+        Minimum pick distances for all events
+    fixed:
+        Whether event depths are fixed for all events
+
+    Returns
+    -------
+    lists of bools of whether quality criteria have been met, ordered as:
+    - maximum azimuthal gap < 180.0
+    - minimum number of picks >= 8
+    - whether at least one pick is an S
+    - whether the minimum distance is within one focal depth
+    - whether the detpth is free
+    """
+    assert len(max_gap) == len(cat_poly)
+    assert len(depths) == len(cat_poly)
+    assert len(min_dist) == len(cat_poly)
+    assert len(fixed) == len(cat_poly)
+    
     # min_azimuth requirement:
-    min_az_bi = []
-    for az in max_gap:
-        if az <= 180:
-            min_az_bi.append(1)
-        else:
-            min_az_bi.append(0)
+    min_az_bi = [az <= 180 for az in max_gap]
+    #for az in max_gap:
+    #    if az <= 180:
+    #        min_az_bi.append(True)
+    #    else:
+    #        min_az_bi.append(False)
     # min picks and one spick requirement
     ps, min_picks = [], []
     for i, ev in enumerate(cat_poly):
-        if len((ev.preferred_origin() or ev.origins[-1]).arrivals) < 8:
-            min_picks.append(0)
+        ori = _get_origin(ev)
+        if ori and len(ori.arrivals) < 8:
+            min_picks.append(False)
         else:
-            min_picks.append(1)
-        rt = [arr.phase for arr in (ev.preferred_origin() or ev.origins[-1]).arrivals]
+            min_picks.append(True)
+        rt = []
+        if ori:
+            rt = [arr.phase for arr in ori.arrivals]
         if rt.count("S") < 1:
-            ps.append(0)
+            ps.append(False)
         else:
-            ps.append(1)
+            ps.append(True)
     # min_dist
-    min_dist_bi = []
-    for i, d in enumerate(depths):
-        if min_dist[i] <= d:
-            min_dist_bi.append(1)
-        else:
-            min_dist_bi.append(0)
+    min_dist_bi = [min_d <= d for min_d, d in zip(min_dist, depths)]
+    #for i, d in enumerate(depths):
+    #    if min_dist[i] <= d:
+    #        min_dist_bi.append(True)
+    #    else:
+    #        min_dist_bi.append(False)
     # plus fixed and_spicks
-    fixed_inv = []
-    for f in fixed:
-        if f == 0:
-            fixed_inv.append(1)
-        else:
-            fixed_inv.append(0)
+    fixed_inv = [not f for f in fixed]
 
     return min_az_bi, min_picks, ps, min_dist_bi, fixed_inv
 
