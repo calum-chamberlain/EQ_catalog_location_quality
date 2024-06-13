@@ -175,7 +175,7 @@ def plot_azimuthal_map(
     # plot scale
     fig.colorbar(mappable, label=r"Maximum Azimuthal Gap, ($^\circ$)")
     ax1.legend(loc="upper left")
-    ax1.set_extent([min(lons) - 1.5, max(lons) + 0.5, min(lats) - 0.2, max(lats) + 0.6])
+    ax1.set_extent([min(lons) - 0.5, max(lons) + 0.5, min(lats) - 0.5, max(lats) + 0.5])
     ax1.add_feature(cfeature.COASTLINE)
     # plot polygon of region
     polyx, polyy = poly.exterior.xy
