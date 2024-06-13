@@ -220,8 +220,14 @@ def plot_depth_scatter(
     max_depth = max(depths)
     max_plot_depth = (10 * (max_depth // 10)) + 10
 
-    good_poly = Polygon([(0, 0), (max_depth, max_depth), (0, max_depth)])
-    okay_poly = Polygon([(0, 0), (1.4 * max_depth, max_depth), (max_depth, max_depth)])
+    good_poly = Polygon([
+        (0, 0), 
+        (max_depth + 0.1, max_depth + 0.1), 
+        (0, max_depth + 0.1)])
+    okay_poly = Polygon([
+        (0, 0), 
+        (1.4 * (max_depth + 0.1), max_depth + 0.1), 
+        (max_depth + 0.1, max_depth + 0.1)])
 
     mindistg, depthsg, fixedg = [], [], []  # Green - good
     mindistS, depthsS, fixedS = [], [], []  # Light pink - okay
@@ -230,7 +236,7 @@ def plot_depth_scatter(
     for i, d in enumerate(min_dist):
         loc = Point(d, depths[i])
         if good_poly.contains(loc) and not s_picks[i]:
-            # If point is within swath of acceptable depth-distance relation
+            # Good - If point is within swath of acceptable depth-distance relation
             mindistg.append(d)
             depthsg.append(depths[i])
             fixedg.append(fixed[i])
@@ -240,12 +246,14 @@ def plot_depth_scatter(
             depthsSg.append(depths[i])
             fixedSg.append(fixed[i])
         elif okay_poly.contains(loc) and s_picks[i]:
-            # Point is within okay swath and there is an S-pick
+            # Okay - Point is within okay swath and there is an S-pick
             mindistS.append(d)
             depthsS.append(depths[i])
             fixedS.append(fixed[i])
         else:
-            # Outside of all swaths, or within secondary swath but without an S pick
+            # Bad - Outside of all swaths, or within secondary swath but without an S pick
+            if d < 20 and depths[i] > 40:
+                print(f"Oddly dodgy event {i} at {depths[i]} km depth and min dist {d} km")
             mindistbad.append(d)
             depthsbad.append(depths[i])
             fixedbad.append(fixed[i])
@@ -287,18 +295,25 @@ def plot_depth_scatter(
     divider = make_axes_locatable(ax)
     ax_histy = divider.append_axes("right", 4, pad=0.5, sharey=ax)
 
-    bins = np.arange(0, max_plot_depth, 5)
+    bin_width = 5
+    bins = np.arange(0, max_plot_depth + bin_width, bin_width)
 
     ax_histy.hist(
-        [depths, depthsS, depthsg, depthsSg],
+        [depthsSg, depthsg, depthsS, depthsbad],
         bins=bins,
         orientation="horizontal",
-        color=["#B3589A", "#F6D3E8", "#BBD4A6", "#9BBF85"],
+        color=[
+            "#9BBF85",
+            "#BBD4A6", 
+            "#F6D3E8", 
+            "#B3589A", 
+            ],
         label=[
-            "bad: depth < min dist",
-            "OK: S-phase contained",
+            "best: P+S constraints",
             "good: depth > min dist",
-            "best: P+S constraints"],
+            "OK: S-phase contained",
+            "bad: depth < min dist",
+            ],
         stacked=True,
     )
     ax_histy.set_xlabel("Cumulative number of earthquakes")
