@@ -3,9 +3,9 @@ channels:
   - conda-forge
   - nodefaults
 dependencies:
-  - obspy
-  - numpy
-  - cartopy
-  - matplotlib
-  - shapely
-  - jupyter
+  - obspy==1.4.1
+  - numpy==1.26.4
+  - cartopy==0.23.0
+  - matplotlib==3.8.4
+  - shapely==2.0.4
+  - jupyter==1.0.0
