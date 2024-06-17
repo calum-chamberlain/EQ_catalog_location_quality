@@ -285,12 +285,6 @@ def plot_depth_scatter(
     ax.set_xlim(0, 100)
     ax.set_ylim(max_plot_depth, 0)
     ax.legend(loc="lower right")
-    ax.set_title(
-        str(round(len(depthsg) / len(depths) * 100, 1))
-        + "% of earthquakes in "
-        + region
-        + " have an acceptable minimum distance (less than depth)"
-    )
 
     divider = make_axes_locatable(ax)
     ax_histy = divider.append_axes("right", 4, pad=0.5, sharey=ax)
